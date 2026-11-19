@@ -70,6 +70,8 @@ class NewPipeRepository {
                 query = cleanQuery,
                 contentFilters = listOf(YoutubeSearchQueryHandlerFactory.MUSIC_SONGS)
             )
+        }.onFailure { err ->
+            Log.w(TAG, "MUSIC_SONGS search failed for '$cleanQuery': ${err.message}")
         }.getOrDefault(emptyList())
 
         collected.addAll(
@@ -85,6 +87,8 @@ class NewPipeRepository {
                     query = "$cleanQuery song audio",
                     contentFilters = listOf(YoutubeSearchQueryHandlerFactory.VIDEOS)
                 )
+            }.onFailure { err ->
+                Log.w(TAG, "VIDEOS search failed for '$cleanQuery': ${err.message}")
             }.getOrDefault(emptyList())
 
             collected.addAll(
@@ -103,7 +107,6 @@ class NewPipeRepository {
 
         val albums = mutableListOf<MovieAlbum>()
 
-        // Always offer a direct synthesized Full Movie Album card for the searched movie name
         val formattedTitle = cleanQuery.split(" ")
             .filter { it.isNotBlank() }
             .joinToString(" ") { word ->
@@ -122,7 +125,6 @@ class NewPipeRepository {
             )
         )
 
-        // Fetch YouTube Music Albums & Playlists matching the movie query
         val playlistItems = mutableListOf<PlaylistInfoItem>()
         runCatching {
             val extractor = ServiceList.YouTube.getSearchExtractor(
@@ -183,7 +185,6 @@ class NewPipeRepository {
 
         val tracks = mutableListOf<Track>()
 
-        // 1. If the album has a direct YouTube playlist URL, extract its tracks first
         if (!album.playlistUrl.isNullOrBlank()) {
             runCatching {
                 val playlistExtractor = ServiceList.YouTube.getPlaylistExtractor(album.playlistUrl)
@@ -199,7 +200,6 @@ class NewPipeRepository {
             }
         }
 
-        // 2. Try finding an official YouTube Music album playlist for featured Bollywood movies
         if (tracks.size < 4) {
             runCatching {
                 val searchExtractor = ServiceList.YouTube.getSearchExtractor(
@@ -229,7 +229,6 @@ class NewPipeRepository {
             }
         }
 
-        // 3. Search individual songs for this movie (explicitly filtering out long jukeboxes)
         if (tracks.size < 6) {
             val searched = searchSongs(
                 query = album.searchQuery,
@@ -279,50 +278,113 @@ class NewPipeRepository {
     }
 
     /**
-     * Resolves an audio-only progressive stream (.m4a or .webm) directly from YouTube
-     * without requesting or loading any video streams.
+     * Resolves the best progressive M4A audio-only stream from NewPipeExtractor's StreamInfo.
+     * Filters out null/empty URLs, non-URL manifests, video-only streams, and DASH-only segments
+     * whenever a progressive HTTP M4A (or WebM/Opus) audio stream is available.
      */
     suspend fun resolveAudioStream(videoId: String): ResolvedAudioStream = withContext(Dispatchers.IO) {
         val watchUrl = "https://www.youtube.com/watch?v=$videoId"
-        val streamInfo = StreamInfo.getInfo(ServiceList.YouTube, watchUrl)
-        val audioStreams: List<AudioStream> = streamInfo.audioStreams
-            .filter { !it.content.isNullOrBlank() && it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP }
-            .ifEmpty {
-                streamInfo.audioStreams.filter { !it.content.isNullOrBlank() }
-            }
+        Log.d(TAG, "Resolving audio stream for $watchUrl")
 
-        if (audioStreams.isEmpty()) {
-            throw IllegalStateException("No audio-only stream available for this track.")
+        val streamInfo = try {
+            StreamInfo.getInfo(ServiceList.YouTube, watchUrl)
+        } catch (e: Exception) {
+            Log.e(TAG, "StreamInfo.getInfo failed for $videoId: ${e.javaClass.simpleName}: ${e.message}", e)
+            throw IllegalStateException("Extraction failed: ${e.message ?: e.javaClass.simpleName}", e)
         }
 
-        // Prefer M4A (AAC) for universal ExoPlayer + offline compatibility, then WEBM/OPUS, sorted by bitrate
-        val preferred = audioStreams
-            .sortedWith(
-                compareByDescending<AudioStream> { stream ->
-                    when (stream.format) {
-                        MediaFormat.M4A -> 3
-                        MediaFormat.WEBMA_OPUS -> 2
-                        MediaFormat.WEBMA -> 1
-                        else -> 0
-                    }
-                }.thenByDescending { it.averageBitrate }
-            )
-            .first()
-
-        val format = preferred.format
-        val extension = when (format) {
-            MediaFormat.M4A -> "m4a"
-            MediaFormat.WEBMA, MediaFormat.WEBMA_OPUS -> "webm"
-            else -> format?.suffix?.ifBlank { "m4a" } ?: "m4a"
-        }
-        val mimeType = format?.mimeType ?: if (extension == "m4a") "audio/mp4" else "audio/webm"
-
-        ResolvedAudioStream(
-            url = preferred.content,
-            extension = extension,
-            bitrateKbps = preferred.averageBitrate.coerceAtLeast(128),
-            mimeType = mimeType
+        val allAudioStreams: List<AudioStream> = streamInfo.audioStreams.orEmpty()
+        Log.d(
+            TAG,
+            "Found ${allAudioStreams.size} raw audioStreams for $videoId: " +
+                allAudioStreams.joinToString { s ->
+                    "[fmt=${s.format?.name}, delivery=${s.deliveryMethod}, bitrate=${s.averageBitrate}, isUrl=${s.isUrl}, hasContent=${!s.content.isNullOrBlank()}]"
+                }
         )
+
+        // Filter to valid playable HTTP URLs (excluding null/empty strings and non-URL manifest blobs)
+        val validUrlAudioStreams = allAudioStreams.filter { stream ->
+            stream.isUrl &&
+                !stream.content.isNullOrBlank() &&
+                stream.content.startsWith("http", ignoreCase = true)
+        }
+
+        // Strongly prefer progressive HTTP streams over DASH/HLS segment manifests
+        val progressiveAudioStreams = validUrlAudioStreams.filter { stream ->
+            stream.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP
+        }
+
+        // Priority 1: Best progressive HTTP M4A (AAC) stream
+        val bestProgressiveM4a = progressiveAudioStreams
+            .filter { it.format == MediaFormat.M4A }
+            .maxByOrNull { it.averageBitrate }
+
+        // Priority 2: Best progressive HTTP WebM / Opus audio stream
+        val bestProgressiveWebm = progressiveAudioStreams
+            .filter { it.format == MediaFormat.WEBMA_OPUS || it.format == MediaFormat.WEBMA }
+            .maxByOrNull { it.averageBitrate }
+
+        // Priority 3: Any other progressive HTTP audio stream
+        val bestAnyProgressive = progressiveAudioStreams
+            .maxByOrNull { it.averageBitrate }
+
+        // Priority 4: Any valid HTTP URL audio stream (preferring M4A, highest bitrate)
+        val bestFallbackAudio = validUrlAudioStreams
+            .sortedWith(
+                compareByDescending<AudioStream> { if (it.format == MediaFormat.M4A) 2 else 1 }
+                    .thenByDescending { it.averageBitrate }
+            )
+            .firstOrNull()
+
+        val selectedAudio = bestProgressiveM4a
+            ?: bestProgressiveWebm
+            ?: bestAnyProgressive
+            ?: bestFallbackAudio
+
+        if (selectedAudio != null) {
+            val format = selectedAudio.format
+            val extension = when (format) {
+                MediaFormat.M4A -> "m4a"
+                MediaFormat.WEBMA, MediaFormat.WEBMA_OPUS -> "webm"
+                else -> format?.suffix?.ifBlank { "m4a" } ?: "m4a"
+            }
+            val mimeType = format?.mimeType ?: if (extension == "m4a") "audio/mp4" else "audio/webm"
+            Log.d(
+                TAG,
+                "Selected audio stream for $videoId: format=${format?.name}, delivery=${selectedAudio.deliveryMethod}, bitrate=${selectedAudio.averageBitrate}kbps"
+            )
+            return@withContext ResolvedAudioStream(
+                url = selectedAudio.content,
+                extension = extension,
+                bitrateKbps = selectedAudio.averageBitrate.coerceAtLeast(128),
+                mimeType = mimeType
+            )
+        }
+
+        // Priority 5: Last-resort fallback to progressive muxed MP4 stream (contains audio track) if audioStreams was empty
+        val muxedFallback = streamInfo.videoStreams.orEmpty()
+            .filter { vs ->
+                vs.isUrl &&
+                    !vs.content.isNullOrBlank() &&
+                    vs.content.startsWith("http", ignoreCase = true) &&
+                    vs.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP
+            }
+            .minByOrNull { it.height } // Lowest video resolution to minimize bandwidth when playing audio
+
+        if (muxedFallback != null) {
+            Log.w(TAG, "No audio-only stream found for $videoId; falling back to muxed stream (${muxedFallback.resolution})")
+            return@withContext ResolvedAudioStream(
+                url = muxedFallback.content,
+                extension = muxedFallback.format?.suffix?.ifBlank { "mp4" } ?: "mp4",
+                bitrateKbps = 128,
+                mimeType = muxedFallback.format?.mimeType ?: "video/mp4"
+            )
+        }
+
+        val errMsg = "No playable audio stream URL returned by YouTube for videoId=$videoId " +
+            "(audioStreams=${allAudioStreams.size}, errors=${streamInfo.errors.size})"
+        Log.e(TAG, errMsg)
+        throw IllegalStateException(errMsg)
     }
 
     private fun fetchSearchStreamItems(
@@ -340,7 +402,7 @@ class NewPipeRepository {
         if (EXCLUDED_KEYWORDS.any { keyword -> titleLower.contains(keyword) }) return false
 
         val duration = item.duration
-        if (duration <= 0L) return false // Live stream or unknown
+        if (duration <= 0L) return false
         if (duration < MIN_SONG_SECONDS || duration > MAX_INDIVIDUAL_SONG_SECONDS) return false
         return true
     }

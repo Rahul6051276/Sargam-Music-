@@ -7,13 +7,12 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
-import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.example.MainActivity
-import com.example.SargamApplication
 import com.example.data.remote.OkHttpDownloader
 
 class SargamPlaybackService : MediaSessionService() {
@@ -25,12 +24,17 @@ class SargamPlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
 
-        val app = application as SargamApplication
-        val okHttpDataSourceFactory = OkHttpDataSource.Factory(app.okHttpClient)
+        // Use DefaultHttpDataSource with the exact same User-Agent as NewPipe's OkHttpDownloader
+        // and cross-protocol redirects enabled so googlevideo.com does not return HTTP 403 Forbidden.
+        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
             .setUserAgent(OkHttpDownloader.USER_AGENT)
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(15_000)
+            .setReadTimeoutMs(20_000)
 
-        // DefaultDataSource transparently supports both local offline file:// URIs and remote HTTPS audio streams
-        val dataSourceFactory = DefaultDataSource.Factory(this, okHttpDataSourceFactory)
+        // DefaultDataSource wraps httpDataSourceFactory so both remote HTTPS audio streams
+        // and local offline file:// URIs from internal storage play seamlessly.
+        val dataSourceFactory = DefaultDataSource.Factory(this, httpDataSourceFactory)
 
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)

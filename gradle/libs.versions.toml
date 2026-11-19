@@ -42,7 +42,7 @@ googleServices = "4.5.0"
 credentials = "1.5.0"
 googleid = "1.1.1"
 media3 = "1.5.1"
-newpipeExtractor = "v0.24.5"
+newpipeExtractor = "v0.26.3"
 guava = "33.3.1-android"
 desugarJdkLibs = "2.1.5"
 

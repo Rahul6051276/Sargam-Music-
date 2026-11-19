@@ -4,10 +4,14 @@ import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import androidx.annotation.OptIn
+import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.example.data.model.PlayerUiState
@@ -17,7 +21,6 @@ import com.example.data.remote.NewPipeRepository
 import com.example.data.repository.MusicLibraryRepository
 import com.example.service.SargamPlaybackService
 import com.google.common.util.concurrent.ListenableFuture
-import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,6 +48,7 @@ class PlaybackController(
     }
 
     private val appContext = context.applicationContext
+    private val mainExecutor = ContextCompat.getMainExecutor(appContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private var controllerFuture: ListenableFuture<MediaController>? = null
@@ -79,14 +83,25 @@ class PlaybackController(
             }
         }
 
+        @OptIn(UnstableApi::class)
         override fun onPlayerError(error: PlaybackException) {
-            Log.e(TAG, "ExoPlayer error: ${error.errorCodeName}", error)
+            val cause = error.cause
+            val detail = when (cause) {
+                is HttpDataSource.InvalidResponseCodeException ->
+                    "HTTP ${cause.responseCode} ${cause.responseMessage.orEmpty()}".trim()
+                is HttpDataSource.HttpDataSourceException ->
+                    cause.message ?: cause.cause?.message ?: cause.javaClass.simpleName
+                else ->
+                    cause?.message ?: error.message ?: error.errorCodeName
+            }
+            val fullMessage = "ExoPlayer error (${error.errorCodeName}): $detail"
+            Log.e(TAG, fullMessage, error)
             _uiState.update {
                 it.copy(
                     isPlaying = false,
                     isBuffering = false,
                     isResolvingStream = false,
-                    errorMessage = "Playback failed (${error.errorCodeName}). Tap next or retry."
+                    errorMessage = fullMessage
                 )
             }
         }
@@ -109,10 +124,10 @@ class PlaybackController(
                         syncControllerState()
                     }
                     .onFailure { err ->
-                        Log.e(TAG, "Failed connecting MediaController", err)
+                        Log.e(TAG, "Failed connecting MediaController: ${err.message}", err)
                     }
             },
-            MoreExecutors.directExecutor()
+            mainExecutor
         )
     }
 
@@ -276,16 +291,21 @@ class PlaybackController(
             }
 
             try {
-                // Step 1: Always check Room Database & internal storage first for instant offline playback
+                // Step 1: Check Room Database & internal storage first for instant offline playback
                 val localFile = libraryRepository.getLocalFileIfDownloaded(track.videoId)
-                val (mediaUri, isOffline) = if (localFile != null) {
-                    Uri.fromFile(localFile) to true
+                val (mediaUri, mimeType, isOffline) = if (localFile != null) {
+                    Log.d(TAG, "Playing offline file for ${track.title}: ${localFile.absolutePath}")
+                    Triple(Uri.fromFile(localFile), null, true)
                 } else {
-                    // Step 2: Resolve fresh audio-only YouTube stream URL via NewPipeExtractor
+                    // Step 2: Resolve progressive audio-only YouTube stream URL via NewPipeExtractor
                     val resolved = withContext(Dispatchers.IO) {
                         newPipeRepository.resolveAudioStream(track.videoId)
                     }
-                    Uri.parse(resolved.url) to false
+                    Log.d(
+                        TAG,
+                        "Streaming ${track.title} (${resolved.extension}, ${resolved.bitrateKbps}kbps, mime=${resolved.mimeType})"
+                    )
+                    Triple(Uri.parse(resolved.url), resolved.mimeType, false)
                 }
 
                 val controller = awaitMediaController()
@@ -299,13 +319,16 @@ class PlaybackController(
                     metadataBuilder.setArtworkUri(Uri.parse(track.thumbnailUrl))
                 }
 
-                val mediaItem = MediaItem.Builder()
+                val mediaItemBuilder = MediaItem.Builder()
                     .setMediaId(track.videoId)
                     .setUri(mediaUri)
                     .setMediaMetadata(metadataBuilder.build())
-                    .build()
 
-                controller.setMediaItem(mediaItem)
+                if (!mimeType.isNullOrBlank()) {
+                    mediaItemBuilder.setMimeType(mimeType)
+                }
+
+                controller.setMediaItem(mediaItemBuilder.build())
                 controller.prepare()
                 controller.play()
 
@@ -319,13 +342,25 @@ class PlaybackController(
             } catch (ce: CancellationException) {
                 throw ce
             } catch (e: Exception) {
-                Log.e(TAG, "Error preparing track ${track.title}", e)
+                val rootCause = generateSequence<Throwable>(e) { it.cause }.last()
+                val detailedReason = buildString {
+                    append("Stream failed: ")
+                    append(e.message ?: e.javaClass.simpleName)
+                    if (rootCause !== e && !rootCause.message.isNullOrBlank() &&
+                        e.message?.contains(rootCause.message!!) != true
+                    ) {
+                        append(" (")
+                        append(rootCause.message)
+                        append(")")
+                    }
+                }
+                Log.e(TAG, "Error preparing track '${track.title}' [${track.videoId}]: $detailedReason", e)
                 _uiState.update {
                     it.copy(
                         isResolvingStream = false,
                         isBuffering = false,
                         isPlaying = false,
-                        errorMessage = "Unable to stream track. Check connection or play offline downloads."
+                        errorMessage = detailedReason
                     )
                 }
             }
@@ -346,11 +381,12 @@ class PlaybackController(
                                 cont.resume(controller)
                             }
                             .onFailure { err ->
+                                Log.e(TAG, "awaitMediaController failed: ${err.message}", err)
                                 cont.cancel(err)
                             }
                     }
                 },
-                MoreExecutors.directExecutor()
+                mainExecutor
             )
         }
     }

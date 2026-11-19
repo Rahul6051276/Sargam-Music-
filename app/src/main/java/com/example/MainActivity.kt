@@ -176,6 +176,12 @@ private fun SargamAppRoot(viewModel: SargamViewModel) {
         }
     }
 
+    LaunchedEffect(playerState.errorMessage) {
+        playerState.errorMessage?.let { err ->
+            snackbarHostState.showSnackbar(err)
+        }
+    }
+
     val tabs = remember {
         listOf(
             TopLevelTab(
