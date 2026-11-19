@@ -1,0 +1,6 @@
+{
+  "name": "Sargam",
+  "description": "Ad-free music streaming and offline audio player with curated Bollywood moods, movie albums, batch downloads, and background Media3 playback.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
