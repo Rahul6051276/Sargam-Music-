@@ -14,6 +14,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.example.data.model.CuratedCatalog
 import com.example.data.model.PlayerUiState
 import com.example.data.model.RepeatModeState
 import com.example.data.model.Track
@@ -55,6 +56,7 @@ class PlaybackController(
     private var mediaController: MediaController? = null
     private var resolveJob: Job? = null
     private var positionTickerJob: Job? = null
+    private var autoPlayJob: Job? = null
 
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
@@ -189,6 +191,9 @@ class PlaybackController(
             candidate
         } else if (state.currentIndex + 1 < queue.size) {
             state.currentIndex + 1
+        } else if (state.autoPlayEnabled && state.currentTrack != null) {
+            fetchAndAppendAutoPlay(state.currentTrack, playImmediatelyAfterAppend = true)
+            return
         } else {
             0
         }
@@ -231,6 +236,14 @@ class PlaybackController(
         _uiState.update { it.copy(shuffleEnabled = !it.shuffleEnabled) }
     }
 
+    fun toggleAutoPlay() {
+        val nowEnabled = !_uiState.value.autoPlayEnabled
+        _uiState.update { it.copy(autoPlayEnabled = nowEnabled) }
+        if (nowEnabled) {
+            maybePrefetchAutoPlay()
+        }
+    }
+
     fun cycleRepeatMode() {
         _uiState.update { state ->
             val nextMode = when (state.repeatMode) {
@@ -260,13 +273,72 @@ class PlaybackController(
                 skipToNext()
             }
             RepeatModeState.OFF -> {
-                if (state.shuffleEnabled) {
+                if (state.shuffleEnabled && queue.size > 1) {
                     skipToNext()
                 } else if (state.currentIndex + 1 < queue.size) {
                     prepareAndPlayIndex(state.currentIndex + 1)
+                } else if (state.autoPlayEnabled && state.currentTrack != null) {
+                    // Infinite Auto-Play Radio: fetch related tracks matching the era/mood and continue seamlessly
+                    fetchAndAppendAutoPlay(state.currentTrack, playImmediatelyAfterAppend = true)
                 } else {
                     _uiState.update { it.copy(isPlaying = false, positionMs = it.durationMs) }
                 }
+            }
+        }
+    }
+
+    private fun maybePrefetchAutoPlay() {
+        val state = _uiState.value
+        val track = state.currentTrack ?: return
+        if (!state.autoPlayEnabled || state.isFetchingAutoPlay) return
+        val remainingTracks = state.queue.lastIndex - state.currentIndex
+        // Proactively extend the queue when 2 or fewer tracks remain so transitions stay gapless
+        if (remainingTracks <= 2) {
+            fetchAndAppendAutoPlay(track, playImmediatelyAfterAppend = false)
+        }
+    }
+
+    private fun fetchAndAppendAutoPlay(seedTrack: Track, playImmediatelyAfterAppend: Boolean) {
+        if (autoPlayJob?.isActive == true && !playImmediatelyAfterAppend) return
+        autoPlayJob?.cancel()
+        autoPlayJob = scope.launch {
+            _uiState.update { it.copy(isFetchingAutoPlay = true) }
+            try {
+                val existingIds = _uiState.value.queue.map { it.videoId }.toSet()
+                val preferClassic = CuratedCatalog.isClassicEraTrack(seedTrack)
+                val radioLabel = if (preferClassic) "Classic Auto-Play Radio" else "Auto-Play Radio"
+
+                val relatedTracks = newPipeRepository.fetchRelatedRadioTracks(
+                    videoId = seedTrack.videoId,
+                    excludeVideoIds = existingIds,
+                    preferClassicEra = preferClassic,
+                    fallbackAlbumTag = radioLabel
+                )
+
+                if (relatedTracks.isNotEmpty()) {
+                    var startIndexToPlay = -1
+                    _uiState.update { state ->
+                        val updatedQueue = state.queue + relatedTracks
+                        if (playImmediatelyAfterAppend) {
+                            startIndexToPlay = state.queue.size
+                        }
+                        state.copy(
+                            queue = updatedQueue,
+                            isFetchingAutoPlay = false
+                        )
+                    }
+                    Log.d(TAG, "Appended ${relatedTracks.size} Auto-Play Radio tracks (classicEra=$preferClassic)")
+                    if (playImmediatelyAfterAppend && startIndexToPlay >= 0) {
+                        prepareAndPlayIndex(startIndexToPlay)
+                    }
+                } else {
+                    _uiState.update { it.copy(isFetchingAutoPlay = false) }
+                }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                Log.w(TAG, "Auto-Play Radio fetch skipped/offline: ${e.message}")
+                _uiState.update { it.copy(isFetchingAutoPlay = false) }
             }
         }
     }
@@ -338,6 +410,11 @@ class PlaybackController(
                         isPlayingOfflineFile = isOffline,
                         errorMessage = null
                     )
+                }
+
+                // Proactively extend queue with Infinite Auto-Play Radio when near the end
+                if (!isOffline) {
+                    maybePrefetchAutoPlay()
                 }
             } catch (ce: CancellationException) {
                 throw ce

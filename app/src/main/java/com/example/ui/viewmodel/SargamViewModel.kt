@@ -7,9 +7,11 @@ import com.example.SargamApplication
 import com.example.data.download.BatchDownloadManager
 import com.example.data.local.PlaylistEntity
 import com.example.data.local.PlaylistSummary
+import com.example.data.model.ArtistRadio
 import com.example.data.model.BatchDownloadState
 import com.example.data.model.CuratedCatalog
 import com.example.data.model.DownloadedAlbumGroup
+import com.example.data.model.HomeFilterChip
 import com.example.data.model.MoodCollection
 import com.example.data.model.MovieAlbum
 import com.example.data.model.PlayerUiState
@@ -33,12 +35,53 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class HomeUiState(
-    val moods: List<MoodCollection> = CuratedCatalog.moodCollections,
+    val selectedFilter: HomeFilterChip = HomeFilterChip.ALL,
+    val goldenRetroCollections: List<MoodCollection> = CuratedCatalog.goldenRetroCollections,
+    val trendingCollections: List<MoodCollection> = CuratedCatalog.trendingFreshCollections,
+    val moodCollections: List<MoodCollection> = CuratedCatalog.moodActivityCollections,
+    val artistRadios: List<ArtistRadio> = CuratedCatalog.artistRadios,
     val featuredAlbums: List<MovieAlbum> = CuratedCatalog.featuredMovieAlbums,
     val freshPicks: List<Track> = emptyList(),
+    val freshPicksTitle: String = "Fresh Picks For You",
     val isLoadingFreshPicks: Boolean = true,
     val errorMessage: String? = null
-)
+) {
+    val visibleGoldenRetro: List<MoodCollection>
+        get() = if (selectedFilter == HomeFilterChip.ALL) {
+            goldenRetroCollections
+        } else {
+            goldenRetroCollections.filter { selectedFilter in it.filters }
+        }
+
+    val visibleTrending: List<MoodCollection>
+        get() = if (selectedFilter == HomeFilterChip.ALL) {
+            trendingCollections
+        } else {
+            trendingCollections.filter { selectedFilter in it.filters }
+        }
+
+    val visibleMoods: List<MoodCollection>
+        get() = if (selectedFilter == HomeFilterChip.ALL) {
+            moodCollections
+        } else {
+            moodCollections.filter { selectedFilter in it.filters }
+        }
+
+    val visibleArtistRadios: List<ArtistRadio>
+        get() = if (selectedFilter == HomeFilterChip.ALL) {
+            artistRadios
+        } else {
+            artistRadios.filter { selectedFilter in it.filters }
+                .ifEmpty { artistRadios }
+        }
+
+    val visibleMovieAlbums: List<MovieAlbum>
+        get() = if (selectedFilter == HomeFilterChip.ALL) {
+            featuredAlbums
+        } else {
+            featuredAlbums.filter { selectedFilter in it.filters }
+        }
+}
 
 data class SearchUiState(
     val query: String = "",
@@ -64,6 +107,13 @@ data class MoodDetailUiState(
     val errorMessage: String? = null
 )
 
+data class ArtistRadioDetailUiState(
+    val artist: ArtistRadio? = null,
+    val tracks: List<Track> = emptyList(),
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null
+)
+
 class SargamViewModel(
     private val newPipeRepository: NewPipeRepository,
     private val libraryRepository: MusicLibraryRepository,
@@ -82,6 +132,9 @@ class SargamViewModel(
 
     private val _moodDetailState = MutableStateFlow(MoodDetailUiState())
     val moodDetailState: StateFlow<MoodDetailUiState> = _moodDetailState.asStateFlow()
+
+    private val _artistRadioDetailState = MutableStateFlow(ArtistRadioDetailUiState())
+    val artistRadioDetailState: StateFlow<ArtistRadioDetailUiState> = _artistRadioDetailState.asStateFlow()
 
     private val _snackbarMessage = MutableStateFlow<String?>(null)
     val snackbarMessage: StateFlow<String?> = _snackbarMessage.asStateFlow()
@@ -112,21 +165,46 @@ class SargamViewModel(
     val favoriteVideoIds: StateFlow<Set<String>> = libraryRepository.favoriteVideoIdsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
+    private var homeLoadJob: Job? = null
     private var searchJob: Job? = null
     private var albumLoadJob: Job? = null
     private var moodLoadJob: Job? = null
+    private var artistLoadJob: Job? = null
 
     init {
-        loadHomeContent()
-        prefetchFeaturedAlbumCovers()
+        loadHomeContent(forceRefresh = false)
+        prefetchHomeArtwork()
+    }
+
+    fun selectHomeFilter(filter: HomeFilterChip) {
+        if (_homeState.value.selectedFilter == filter) return
+        _homeState.update { it.copy(selectedFilter = filter) }
+        loadHomeContent(forceRefresh = false)
     }
 
     fun loadHomeContent(forceRefresh: Boolean = false) {
-        viewModelScope.launch {
-            _homeState.update { it.copy(isLoadingFreshPicks = true, errorMessage = null) }
+        homeLoadJob?.cancel()
+        homeLoadJob = viewModelScope.launch {
+            val activeFilter = _homeState.value.selectedFilter
+            val targetCollection = CuratedCatalog.freshPickQueryForFilter(activeFilter)
+            val sectionTitle = when (activeFilter) {
+                HomeFilterChip.ALL -> "Fresh Picks For You"
+                else -> "${activeFilter.label} Picks"
+            }
+
+            _homeState.update {
+                it.copy(
+                    freshPicksTitle = sectionTitle,
+                    isLoadingFreshPicks = true,
+                    errorMessage = null
+                )
+            }
             try {
-                val defaultMood = CuratedCatalog.moodCollections.first()
-                val tracks = newPipeRepository.fetchMoodTracks(defaultMood, forceRefresh)
+                val tracks = newPipeRepository.fetchMoodTracks(
+                    mood = targetCollection,
+                    forceRefresh = forceRefresh,
+                    targetCount = 24
+                )
                 _homeState.update {
                     it.copy(
                         freshPicks = tracks,
@@ -145,7 +223,8 @@ class SargamViewModel(
         }
     }
 
-    private fun prefetchFeaturedAlbumCovers() {
+    private fun prefetchHomeArtwork() {
+        // Prefetch featured movie album covers
         viewModelScope.launch {
             val albums = _homeState.value.featuredAlbums
             val updated = albums.map { album ->
@@ -155,6 +234,39 @@ class SargamViewModel(
                 }
             }.awaitAll()
             _homeState.update { it.copy(featuredAlbums = updated) }
+        }
+
+        // Prefetch circular artist radio avatars
+        viewModelScope.launch {
+            val artists = _homeState.value.artistRadios
+            val updatedArtists = artists.map { artist ->
+                async {
+                    val thumb = newPipeRepository.fetchThumbnailPreviewForQuery(
+                        "${artist.name} official audio song"
+                    )
+                    if (!thumb.isNullOrBlank()) artist.copy(avatarUrl = thumb) else artist
+                }
+            }.awaitAll()
+            _homeState.update { it.copy(artistRadios = updatedArtists) }
+        }
+
+        // Prefetch shelf cover art for Golden Retro & Trending shelves
+        viewModelScope.launch {
+            val retroUpdated = _homeState.value.goldenRetroCollections.map { col ->
+                async {
+                    val thumb = newPipeRepository.fetchThumbnailPreviewForQuery(col.seedQueries.first())
+                    if (!thumb.isNullOrBlank()) col.copy(artworkUrl = thumb) else col
+                }
+            }.awaitAll()
+            _homeState.update { it.copy(goldenRetroCollections = retroUpdated) }
+
+            val trendingUpdated = _homeState.value.trendingCollections.map { col ->
+                async {
+                    val thumb = newPipeRepository.fetchThumbnailPreviewForQuery(col.seedQueries.first())
+                    if (!thumb.isNullOrBlank()) col.copy(artworkUrl = thumb) else col
+                }
+            }.awaitAll()
+            _homeState.update { it.copy(trendingCollections = trendingUpdated) }
         }
     }
 
@@ -200,7 +312,6 @@ class SargamViewModel(
             val songs = songsDeferred.await()
             val albums = albumsDeferred.await()
 
-            // Enrich synthesized top movie album with first matching song thumbnail if needed
             val topSongThumb = songs.firstOrNull()?.thumbnailUrl
             val enrichedAlbums = albums.mapIndexed { idx, album ->
                 if (idx == 0 && album.artworkUrl.isNullOrBlank() && !topSongThumb.isNullOrBlank()) {
@@ -256,7 +367,6 @@ class SargamViewModel(
                     )
                 }
             } catch (e: Exception) {
-                // Offline fallback: show any locally downloaded songs belonging to this album
                 val offlineMatches = downloadedTracks.value.filter {
                     it.albumName.equals(album.title, ignoreCase = true)
                 }
@@ -283,7 +393,11 @@ class SargamViewModel(
         )
         moodLoadJob = viewModelScope.launch {
             try {
-                val tracks = newPipeRepository.fetchMoodTracks(mood, forceRefresh)
+                val tracks = newPipeRepository.fetchMoodTracks(
+                    mood = mood,
+                    forceRefresh = forceRefresh,
+                    targetCount = 40
+                )
                 _moodDetailState.update {
                     it.copy(
                         tracks = tracks,
@@ -303,6 +417,51 @@ class SargamViewModel(
                         isLoading = false,
                         errorMessage = if (offlineMatches.isEmpty()) {
                             "Offline: download ${mood.title} while connected to play anytime."
+                        } else null
+                    )
+                }
+            }
+        }
+    }
+
+    fun openArtistRadio(artist: ArtistRadio, forceRefresh: Boolean = false) {
+        artistLoadJob?.cancel()
+        val enrichedArtist = _homeState.value.artistRadios.firstOrNull { it.id == artist.id } ?: artist
+        _artistRadioDetailState.value = ArtistRadioDetailUiState(
+            artist = enrichedArtist,
+            tracks = emptyList(),
+            isLoading = true,
+            errorMessage = null
+        )
+        artistLoadJob = viewModelScope.launch {
+            try {
+                val tracks = newPipeRepository.fetchArtistRadioTracks(
+                    artist = enrichedArtist,
+                    forceRefresh = forceRefresh
+                )
+                val avatar = enrichedArtist.avatarUrl?.takeIf { it.isNotBlank() }
+                    ?: tracks.firstOrNull { it.thumbnailUrl.isNotBlank() }?.thumbnailUrl
+                _artistRadioDetailState.update {
+                    it.copy(
+                        artist = enrichedArtist.copy(avatarUrl = avatar),
+                        tracks = tracks,
+                        isLoading = false,
+                        errorMessage = if (tracks.isEmpty()) {
+                            "Unable to load radio mix for ${enrichedArtist.name}. Tap Refresh."
+                        } else null
+                    )
+                }
+            } catch (e: Exception) {
+                val offlineMatches = downloadedTracks.value.filter {
+                    it.artist.contains(enrichedArtist.name, ignoreCase = true) ||
+                        it.albumName.contains(enrichedArtist.name, ignoreCase = true)
+                }
+                _artistRadioDetailState.update {
+                    it.copy(
+                        tracks = offlineMatches,
+                        isLoading = false,
+                        errorMessage = if (offlineMatches.isEmpty()) {
+                            "Offline: download ${enrichedArtist.name} Radio while connected."
                         } else null
                     )
                 }
@@ -331,7 +490,7 @@ class SargamViewModel(
             playAll(downloadedTracks.value)
         } else {
             viewModelScope.launch {
-                val trending = CuratedCatalog.moodCollections[1]
+                val trending = CuratedCatalog.trendingFreshCollections.first()
                 val tracks = runCatching { newPipeRepository.fetchMoodTracks(trending) }.getOrDefault(emptyList())
                 if (tracks.isNotEmpty()) {
                     playAll(tracks)
@@ -347,6 +506,11 @@ class SargamViewModel(
     fun skipPrevious() = playbackController.skipToPrevious()
     fun seekTo(positionMs: Long) = playbackController.seekTo(positionMs)
     fun toggleShuffle() = playbackController.toggleShuffle()
+    fun toggleAutoPlay() {
+        playbackController.toggleAutoPlay()
+        val enabled = playbackController.uiState.value.autoPlayEnabled
+        showSnackbar(if (enabled) "Infinite Auto-Play Radio enabled" else "Auto-Play Radio paused")
+    }
     fun cycleRepeatMode() = playbackController.cycleRepeatMode()
     fun playQueueIndex(index: Int) = playbackController.playQueueIndex(index)
     fun clearPlaybackError() = playbackController.clearError()

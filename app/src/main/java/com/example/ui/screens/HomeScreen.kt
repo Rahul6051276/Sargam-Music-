@@ -3,6 +3,7 @@ package com.example.ui.screens
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,20 +26,26 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Celebration
 import androidx.compose.material.icons.rounded.DirectionsCar
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FitnessCenter
+import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.LocalFireDepartment
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Nightlight
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.Radio
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Verified
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -57,9 +64,12 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
+import com.example.data.model.ArtistRadio
+import com.example.data.model.HomeFilterChip
 import com.example.data.model.MoodCollection
 import com.example.data.model.MovieAlbum
 import com.example.data.model.Track
@@ -84,19 +94,27 @@ fun HomeScreen(
     downloadedVideoIds: Set<String>,
     favoriteVideoIds: Set<String>,
     downloadProgressMap: Map<String, TrackDownloadProgress>,
+    onFilterSelected: (HomeFilterChip) -> Unit,
     onSearchShortcutClick: () -> Unit,
     onPlayTrendingClick: () -> Unit,
     onMoodClick: (MoodCollection) -> Unit,
+    onArtistRadioClick: (ArtistRadio) -> Unit,
     onMovieAlbumClick: (MovieAlbum) -> Unit,
     onTrackClick: (Track, List<Track>) -> Unit,
     onPlayAllFresh: (List<Track>) -> Unit,
-    onDownloadAllFresh: (List<Track>) -> Unit,
+    onDownloadAllFresh: (String, List<Track>) -> Unit,
     onDownloadTrack: (Track) -> Unit,
     onAddToPlaylist: (Track) -> Unit,
     onToggleFavorite: (Track) -> Unit,
     onRefreshHome: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val visibleGoldenRetro = homeState.visibleGoldenRetro
+    val visibleTrending = homeState.visibleTrending
+    val visibleMoods = homeState.visibleMoods
+    val visibleArtists = homeState.visibleArtistRadios
+    val visibleAlbums = homeState.visibleMovieAlbums
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -175,147 +193,274 @@ fun HomeScreen(
             }
         }
 
-        // Hero Banner Card
-        item(key = "home_hero_banner") {
-            Box(
+        // Interactive Language & Era Filter Chips
+        item(key = "home_filter_chips") {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 6.dp)
-                    .height(192.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .clickable(onClick = onPlayTrendingClick)
-                    .testTag("home_hero_banner")
+                    .padding(bottom = 10.dp)
+                    .testTag("home_filter_chips_row")
             ) {
-                Image(
-                    painter = painterResource(id = R.drawable.img_hero_banner),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.horizontalGradient(
-                                colors = listOf(
-                                    MidnightBackground.copy(alpha = 0.92f),
-                                    MidnightSurface.copy(alpha = 0.70f),
-                                    Color.Transparent
-                                )
+                items(HomeFilterChip.entries, key = { it.name }) { chip ->
+                    val selected = homeState.selectedFilter == chip
+                    FilterChip(
+                        selected = selected,
+                        onClick = { onFilterSelected(chip) },
+                        label = {
+                            Text(
+                                text = chip.label,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
                             )
-                        )
-                )
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(20.dp),
-                    verticalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Surface(
-                        color = ElectricCyan.copy(alpha = 0.18f),
-                        shape = CircleShape,
-                        border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.5f))
-                    ) {
-                        Text(
-                            text = stringResource(R.string.hero_badge),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = ElectricCyan,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                        )
-                    }
-
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(
-                            text = stringResource(R.string.hero_title),
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = TextPrimary,
-                            maxLines = 2
-                        )
-                        Text(
-                            text = stringResource(R.string.hero_subtitle),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary,
-                            maxLines = 2
-                        )
-                    }
-
-                    Button(
-                        onClick = onPlayTrendingClick,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = EmeraldTeal,
-                            contentColor = OnEmeraldTeal
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = MidnightSurface,
+                            labelColor = TextSecondary,
+                            selectedContainerColor = EmeraldTeal,
+                            selectedLabelColor = OnEmeraldTeal
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = selected,
+                            borderColor = MidnightOutline,
+                            selectedBorderColor = EmeraldTeal
                         ),
                         shape = CircleShape,
-                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+                        modifier = Modifier.testTag("home_filter_${chip.name.lowercase()}")
+                    )
+                }
+            }
+        }
+
+        // Hero Banner Card (shown on All filter for clean editorial focus)
+        if (homeState.selectedFilter == HomeFilterChip.ALL) {
+            item(key = "home_hero_banner") {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 6.dp)
+                        .height(188.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .clickable(onClick = onPlayTrendingClick)
+                        .testTag("home_hero_banner")
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.img_hero_banner),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    Box(
                         modifier = Modifier
-                            .height(40.dp)
-                            .testTag("hero_play_trending_button")
+                            .fillMaxSize()
+                            .background(
+                                Brush.horizontalGradient(
+                                    colors = listOf(
+                                        MidnightBackground.copy(alpha = 0.92f),
+                                        MidnightSurface.copy(alpha = 0.70f),
+                                        Color.Transparent
+                                    )
+                                )
+                            )
+                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(20.dp),
+                        verticalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Icon(
-                            imageVector = Icons.Rounded.PlayArrow,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = stringResource(R.string.hero_cta),
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold
+                        Surface(
+                            color = ElectricCyan.copy(alpha = 0.18f),
+                            shape = CircleShape,
+                            border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.5f))
+                        ) {
+                            Text(
+                                text = stringResource(R.string.hero_badge),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = ElectricCyan,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = stringResource(R.string.hero_title),
+                                style = MaterialTheme.typography.headlineMedium,
+                                color = TextPrimary,
+                                maxLines = 2
+                            )
+                            Text(
+                                text = stringResource(R.string.hero_subtitle),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary,
+                                maxLines = 2
+                            )
+                        }
+
+                        Button(
+                            onClick = onPlayTrendingClick,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = EmeraldTeal,
+                                contentColor = OnEmeraldTeal
+                            ),
+                            shape = CircleShape,
+                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+                            modifier = Modifier
+                                .height(40.dp)
+                                .testTag("hero_play_trending_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.PlayArrow,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = stringResource(R.string.hero_cta),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 1. Dedicated Golden Era & Old Classics Hub
+        if (visibleGoldenRetro.isNotEmpty()) {
+            item(key = "section_golden_retro_header") {
+                SectionHeader(
+                    title = "Golden Era & Old Classics",
+                    subtitle = "Original vintage melodies · Zero remixes or jukeboxes",
+                    badgeText = "EVERGREEN",
+                    modifier = Modifier.padding(top = 20.dp, bottom = 10.dp)
+                )
+            }
+
+            item(key = "golden_retro_carousel") {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.testTag("golden_retro_carousel")
+                ) {
+                    items(visibleGoldenRetro, key = { it.id }) { collection ->
+                        EditorialCollectionCard(
+                            collection = collection,
+                            onClick = { onMoodClick(collection) }
                         )
                     }
                 }
             }
         }
 
-        // Featured Movie Albums & Soundtracks Carousel
-        item(key = "section_movie_albums_title") {
-            SectionHeader(
-                title = stringResource(R.string.section_movie_albums),
-                subtitle = "Full Bollywood soundtracks · Play & download offline",
-                modifier = Modifier.padding(top = 20.dp, bottom = 10.dp)
-            )
-        }
+        // 2. Legendary & Modern Artist Radio Stations (Circular Artist Avatars)
+        if (visibleArtists.isNotEmpty()) {
+            item(key = "section_artist_radios_header") {
+                SectionHeader(
+                    title = "Artist Radio Stations",
+                    subtitle = "Tap any legend or star for a fresh 40-track radio mix",
+                    badgeText = "40-TRACK MIX",
+                    modifier = Modifier.padding(top = 24.dp, bottom = 12.dp)
+                )
+            }
 
-        item(key = "movie_albums_carousel") {
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                modifier = Modifier.testTag("featured_albums_carousel")
-            ) {
-                items(homeState.featuredAlbums, key = { it.id }) { album ->
-                    MovieAlbumSquareCard(
-                        album = album,
-                        onClick = { onMovieAlbumClick(album) }
-                    )
+            item(key = "artist_radios_carousel") {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.testTag("artist_radios_carousel")
+                ) {
+                    items(visibleArtists, key = { it.id }) { artist ->
+                        ArtistRadioCircleCard(
+                            artist = artist,
+                            onClick = { onArtistRadioClick(artist) }
+                        )
+                    }
                 }
             }
         }
 
-        // Auto-Curated Moods & Vibes
-        item(key = "section_moods_title") {
-            SectionHeader(
-                title = stringResource(R.string.section_moods),
-                subtitle = "Auto-curated fresh Hindi, Bollywood & Punjabi vibes",
-                modifier = Modifier.padding(top = 24.dp, bottom = 10.dp)
-            )
-        }
+        // 3. Editor's Picks: Trending & Fresh Shelf
+        if (visibleTrending.isNotEmpty()) {
+            item(key = "section_trending_header") {
+                SectionHeader(
+                    title = "Editor's Picks · Trending & Fresh",
+                    subtitle = "Daily rotated YouTube Music playlists & chartbusters",
+                    modifier = Modifier.padding(top = 24.dp, bottom = 10.dp)
+                )
+            }
 
-        item(key = "moods_carousel") {
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.testTag("moods_carousel")
-            ) {
-                items(homeState.moods, key = { it.id }) { mood ->
-                    MoodVibeCard(
-                        mood = mood,
-                        onClick = { onMoodClick(mood) }
-                    )
+            item(key = "trending_carousel") {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.testTag("trending_fresh_carousel")
+                ) {
+                    items(visibleTrending, key = { it.id }) { collection ->
+                        EditorialCollectionCard(
+                            collection = collection,
+                            onClick = { onMoodClick(collection) }
+                        )
+                    }
                 }
             }
         }
 
-        // Fresh Picks Section
+        // 4. Featured Movie Albums & Soundtracks Carousel
+        if (visibleAlbums.isNotEmpty()) {
+            item(key = "section_movie_albums_title") {
+                SectionHeader(
+                    title = stringResource(R.string.section_movie_albums),
+                    subtitle = "Full Bollywood soundtracks · Play & download offline",
+                    modifier = Modifier.padding(top = 24.dp, bottom = 10.dp)
+                )
+            }
+
+            item(key = "movie_albums_carousel") {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.testTag("featured_albums_carousel")
+                ) {
+                    items(visibleAlbums, key = { it.id }) { album ->
+                        MovieAlbumSquareCard(
+                            album = album,
+                            onClick = { onMovieAlbumClick(album) }
+                        )
+                    }
+                }
+            }
+        }
+
+        // 5. Mood & Activity Shelf
+        if (visibleMoods.isNotEmpty()) {
+            item(key = "section_moods_title") {
+                SectionHeader(
+                    title = "Mood & Activity",
+                    subtitle = "Curated soundscapes for late nights, drives & workouts",
+                    modifier = Modifier.padding(top = 24.dp, bottom = 10.dp)
+                )
+            }
+
+            item(key = "moods_carousel") {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.testTag("moods_carousel")
+                ) {
+                    items(visibleMoods, key = { it.id }) { mood ->
+                        MoodVibeCard(
+                            mood = mood,
+                            onClick = { onMoodClick(mood) }
+                        )
+                    }
+                }
+            }
+        }
+
+        // 6. Dynamic Fresh Picks Section (Synced with active filter chip + Rotate/Refresh)
         item(key = "section_fresh_picks_header") {
             Row(
                 modifier = Modifier
@@ -326,12 +471,12 @@ fun HomeScreen(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = stringResource(R.string.section_fresh_picks),
+                        text = homeState.freshPicksTitle,
                         style = MaterialTheme.typography.headlineSmall,
                         color = TextPrimary
                     )
                     Text(
-                        text = "Latest Hindi & Bollywood audio releases",
+                        text = "Tap refresh to rotate fresh tracks & playlists",
                         style = MaterialTheme.typography.bodySmall,
                         color = TextSecondary
                     )
@@ -375,7 +520,7 @@ fun HomeScreen(
                     }
 
                     OutlinedButton(
-                        onClick = { onDownloadAllFresh(homeState.freshPicks) },
+                        onClick = { onDownloadAllFresh(homeState.freshPicksTitle, homeState.freshPicks) },
                         border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.65f)),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = ElectricCyan),
                         shape = CircleShape,
@@ -407,7 +552,7 @@ fun HomeScreen(
                         ) {
                             CircularProgressIndicator(color = EmeraldTeal)
                             Text(
-                                text = "Fetching fresh Bollywood tracks…",
+                                text = "Curating ${homeState.freshPicksTitle}…",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextSecondary
                             )
@@ -471,7 +616,8 @@ fun HomeScreen(
 private fun SectionHeader(
     title: String,
     subtitle: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    badgeText: String? = null
 ) {
     Column(
         modifier = modifier
@@ -479,15 +625,237 @@ private fun SectionHeader(
             .padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.headlineSmall,
-            color = TextPrimary
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineSmall,
+                color = TextPrimary
+            )
+            if (!badgeText.isNullOrBlank()) {
+                Surface(
+                    color = ElectricCyan.copy(alpha = 0.14f),
+                    shape = CircleShape,
+                    border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.4f))
+                ) {
+                    Text(
+                        text = badgeText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ElectricCyan,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                    )
+                }
+            }
+        }
         Text(
             text = subtitle,
             style = MaterialTheme.typography.bodySmall,
             color = TextSecondary
+        )
+    }
+}
+
+@Composable
+private fun EditorialCollectionCard(
+    collection: MoodCollection,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(172.dp)
+            .testTag("collection_card_${collection.id}")
+            .clickable(onClick = onClick)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(142.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            Color(collection.gradientStartHex),
+                            Color(collection.gradientEndHex)
+                        )
+                    )
+                )
+                .border(
+                    width = 1.dp,
+                    color = Color.White.copy(alpha = 0.12f),
+                    shape = RoundedCornerShape(20.dp)
+                )
+        ) {
+            if (!collection.artworkUrl.isNullOrBlank()) {
+                ArtworkImage(
+                    url = collection.artworkUrl,
+                    contentDescription = collection.title,
+                    modifier = Modifier.fillMaxSize(),
+                    cornerRadius = 20.dp
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color(collection.gradientStartHex).copy(alpha = 0.35f),
+                                    MidnightBackground.copy(alpha = 0.85f)
+                                )
+                            )
+                        )
+                )
+            } else {
+                Icon(
+                    imageVector = moodIconFor(collection.id),
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.22f),
+                    modifier = Modifier
+                        .size(64.dp)
+                        .align(Alignment.Center)
+                )
+            }
+
+            Surface(
+                color = MidnightBackground.copy(alpha = 0.72f),
+                shape = CircleShape,
+                border = BorderStroke(1.dp, EmeraldTeal.copy(alpha = 0.45f)),
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(10.dp)
+            ) {
+                Text(
+                    text = collection.badge,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = EmeraldTeal,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(10.dp)
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(EmeraldTeal),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.PlayArrow,
+                    contentDescription = null,
+                    tint = OnEmeraldTeal,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = collection.title,
+            style = MaterialTheme.typography.titleMedium,
+            color = TextPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = collection.subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = TextSecondary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun ArtistRadioCircleCard(
+    artist: ArtistRadio,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .width(102.dp)
+            .testTag("artist_radio_${artist.id}")
+            .clickable(onClick = onClick)
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(92.dp)
+                .clip(CircleShape)
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            Color(artist.accentStartHex),
+                            Color(artist.accentEndHex)
+                        )
+                    )
+                )
+                .padding(3.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+                    .background(MidnightSurfaceElevated),
+                contentAlignment = Alignment.Center
+            ) {
+                if (!artist.avatarUrl.isNullOrBlank()) {
+                    ArtworkImage(
+                        url = artist.avatarUrl,
+                        contentDescription = artist.name,
+                        modifier = Modifier.fillMaxSize(),
+                        cornerRadius = 46.dp
+                    )
+                } else {
+                    Text(
+                        text = artist.name.split(" ")
+                            .take(2)
+                            .mapNotNull { it.firstOrNull()?.uppercaseChar() }
+                            .joinToString(""),
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = EmeraldTeal
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(4.dp)
+                        .size(22.dp)
+                        .clip(CircleShape)
+                        .background(MidnightBackground.copy(alpha = 0.85f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Radio,
+                        contentDescription = null,
+                        tint = ElectricCyan,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(7.dp))
+
+        Text(
+            text = artist.name,
+            style = MaterialTheme.typography.titleSmall,
+            color = TextPrimary,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = artist.eraLabel,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (artist.isClassicLegend) ElectricCyan else EmeraldTeal,
+            maxLines = 1
         )
     }
 }
@@ -676,13 +1044,17 @@ private fun MoodVibeCard(
     }
 }
 
-fun moodIconFor(moodId: String): ImageVector = when (moodId) {
-    "new_releases" -> Icons.Rounded.AutoAwesome
-    "trending_top_50" -> Icons.Rounded.LocalFireDepartment
-    "romantic_love" -> Icons.Rounded.Favorite
-    "sad_heartbreak" -> Icons.Rounded.Nightlight
-    "travel_long_drive" -> Icons.Rounded.DirectionsCar
-    "gym_workout" -> Icons.Rounded.FitnessCenter
-    "evergreen_90s" -> Icons.Rounded.Album
+fun moodIconFor(moodId: String): ImageVector = when {
+    moodId.contains("viral") || moodId.contains("new") -> Icons.Rounded.AutoAwesome
+    moodId.contains("top_50") || moodId.contains("punjabi") -> Icons.Rounded.LocalFireDepartment
+    moodId.contains("english") -> Icons.Rounded.Public
+    moodId.contains("romantic") || moodId.contains("love") -> Icons.Rounded.Favorite
+    moodId.contains("lofi") || moodId.contains("sad") || moodId.contains("heartbreak") || moodId.contains("melancholy") ->
+        Icons.Rounded.Nightlight
+    moodId.contains("drive") || moodId.contains("roadtrip") -> Icons.Rounded.DirectionsCar
+    moodId.contains("workout") || moodId.contains("gym") -> Icons.Rounded.FitnessCenter
+    moodId.contains("party") -> Icons.Rounded.Celebration
+    moodId.contains("ghazal") || moodId.contains("sufi") -> Icons.Rounded.LibraryMusic
+    moodId.contains("retro") || moodId.contains("70s") || moodId.contains("90s") -> Icons.Rounded.Album
     else -> Icons.Rounded.MusicNote
 }

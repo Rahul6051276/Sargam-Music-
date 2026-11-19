@@ -236,6 +236,7 @@ fun FullScreenNowPlayingDialog(
     onSeekTo: (Long) -> Unit,
     onToggleShuffle: () -> Unit,
     onCycleRepeat: () -> Unit,
+    onToggleAutoPlay: () -> Unit,
     onToggleFavorite: (Track) -> Unit,
     onDownloadTrack: (Track) -> Unit,
     onAddToPlaylist: (Track) -> Unit,
@@ -680,12 +681,50 @@ fun FullScreenNowPlayingDialog(
                     .fillMaxHeight(0.65f)
                     .padding(horizontal = 20.dp)
             ) {
-                Text(
-                    text = "${stringResource(R.string.now_playing_queue)} (${playerState.queue.size})",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = TextPrimary,
-                    modifier = Modifier.padding(bottom = 12.dp)
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(
+                            text = "${stringResource(R.string.now_playing_queue)} (${playerState.queue.size})",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = TextPrimary
+                        )
+                        if (playerState.isFetchingAutoPlay) {
+                            Text(
+                                text = "Queueing matching related tracks…",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = ElectricCyan
+                            )
+                        }
+                    }
+
+                    Surface(
+                        onClick = onToggleAutoPlay,
+                        color = if (playerState.autoPlayEnabled) {
+                            EmeraldTeal.copy(alpha = 0.16f)
+                        } else {
+                            MidnightSurfaceElevated
+                        },
+                        shape = CircleShape,
+                        border = BorderStroke(
+                            1.dp,
+                            if (playerState.autoPlayEnabled) EmeraldTeal.copy(alpha = 0.55f) else MidnightOutline
+                        ),
+                        modifier = Modifier.testTag("queue_autoplay_toggle")
+                    ) {
+                        Text(
+                            text = if (playerState.autoPlayEnabled) "Auto-Play ON" else "Auto-Play OFF",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (playerState.autoPlayEnabled) EmeraldTeal else TextSecondary,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                    }
+                }
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.fillMaxSize()

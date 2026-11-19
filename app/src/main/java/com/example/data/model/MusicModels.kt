@@ -2,6 +2,22 @@ package com.example.data.model
 
 import androidx.compose.runtime.Immutable
 
+enum class HomeFilterChip(val label: String) {
+    ALL("All"),
+    HINDI("Hindi"),
+    OLD_CLASSICS("Old Classics"),
+    NINETIES_HITS("90s Hits"),
+    PUNJABI("Punjabi"),
+    ENGLISH("English"),
+    GHAZAL_SUFI("Ghazal & Sufi")
+}
+
+enum class CollectionCategory {
+    GOLDEN_RETRO,
+    TRENDING_FRESH,
+    MOOD_ACTIVITY
+}
+
 @Immutable
 data class Track(
     val videoId: String,
@@ -33,7 +49,8 @@ data class MovieAlbum(
     val playlistUrl: String? = null,
     val artworkUrl: String? = null,
     val gradientStartHex: Long = 0xFF0F3D4C,
-    val gradientEndHex: Long = 0xFF131B2E
+    val gradientEndHex: Long = 0xFF131B2E,
+    val filters: Set<HomeFilterChip> = setOf(HomeFilterChip.ALL, HomeFilterChip.HINDI)
 )
 
 @Immutable
@@ -44,7 +61,26 @@ data class MoodCollection(
     val badge: String,
     val searchQuery: String,
     val gradientStartHex: Long,
-    val gradientEndHex: Long
+    val gradientEndHex: Long,
+    val category: CollectionCategory = CollectionCategory.MOOD_ACTIVITY,
+    val isOldClassic: Boolean = false,
+    val seedQueries: List<String> = listOf(searchQuery),
+    val filters: Set<HomeFilterChip> = setOf(HomeFilterChip.ALL, HomeFilterChip.HINDI),
+    val artworkUrl: String? = null
+)
+
+@Immutable
+data class ArtistRadio(
+    val id: String,
+    val name: String,
+    val eraLabel: String,
+    val subtitle: String,
+    val isClassicLegend: Boolean,
+    val seedQueries: List<String>,
+    val filters: Set<HomeFilterChip>,
+    val accentStartHex: Long,
+    val accentEndHex: Long,
+    val avatarUrl: String? = null
 )
 
 enum class SearchFilter(val label: String) {
@@ -116,6 +152,8 @@ data class PlayerUiState(
     val isBuffering: Boolean = false,
     val isResolvingStream: Boolean = false,
     val isPlayingOfflineFile: Boolean = false,
+    val autoPlayEnabled: Boolean = true,
+    val isFetchingAutoPlay: Boolean = false,
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
     val shuffleEnabled: Boolean = false,

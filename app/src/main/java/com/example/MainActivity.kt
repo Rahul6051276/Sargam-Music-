@@ -76,6 +76,7 @@ import com.example.ui.components.CreatePlaylistDialog
 import com.example.ui.components.FullScreenNowPlayingDialog
 import com.example.ui.components.StickyMiniPlayer
 import com.example.ui.navigation.AlbumDetailRoute
+import com.example.ui.navigation.ArtistRadioRoute
 import com.example.ui.navigation.DownloadsRoute
 import com.example.ui.navigation.HomeRoute
 import com.example.ui.navigation.LibraryRoute
@@ -83,6 +84,7 @@ import com.example.ui.navigation.MoodDetailRoute
 import com.example.ui.navigation.PlaylistDetailRoute
 import com.example.ui.navigation.SearchRoute
 import com.example.ui.screens.AlbumDetailScreen
+import com.example.ui.screens.ArtistRadioScreen
 import com.example.ui.screens.DownloadsScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.LibraryScreen
@@ -154,6 +156,7 @@ private fun SargamAppRoot(viewModel: SargamViewModel) {
     val searchState by viewModel.searchState.collectAsStateWithLifecycle()
     val albumDetailState by viewModel.albumDetailState.collectAsStateWithLifecycle()
     val moodDetailState by viewModel.moodDetailState.collectAsStateWithLifecycle()
+    val artistRadioDetailState by viewModel.artistRadioDetailState.collectAsStateWithLifecycle()
     val playerState by viewModel.playerState.collectAsStateWithLifecycle()
     val downloadedTracks by viewModel.downloadedTracks.collectAsStateWithLifecycle()
     val downloadedVideoIds by viewModel.downloadedVideoIds.collectAsStateWithLifecycle()
@@ -337,11 +340,16 @@ private fun SargamAppRoot(viewModel: SargamViewModel) {
                                 downloadedVideoIds = downloadedVideoIds,
                                 favoriteVideoIds = favoriteVideoIds,
                                 downloadProgressMap = downloadProgressMap,
+                                onFilterSelected = { viewModel.selectHomeFilter(it) },
                                 onSearchShortcutClick = { navigateToTab(SearchRoute) },
                                 onPlayTrendingClick = { viewModel.playTrendingHero() },
                                 onMoodClick = { mood ->
                                     viewModel.openMoodCollection(mood)
                                     navController.navigate(MoodDetailRoute(mood.id))
+                                },
+                                onArtistRadioClick = { artist ->
+                                    viewModel.openArtistRadio(artist)
+                                    navController.navigate(ArtistRadioRoute(artist.id))
                                 },
                                 onMovieAlbumClick = { album ->
                                     viewModel.openMovieAlbum(album)
@@ -349,8 +357,8 @@ private fun SargamAppRoot(viewModel: SargamViewModel) {
                                 },
                                 onTrackClick = { track, queue -> viewModel.playTrack(track, queue) },
                                 onPlayAllFresh = { tracks -> viewModel.playAll(tracks) },
-                                onDownloadAllFresh = { tracks ->
-                                    viewModel.downloadCollection("New Releases", tracks)
+                                onDownloadAllFresh = { title, tracks ->
+                                    viewModel.downloadCollection(title, tracks)
                                 },
                                 onDownloadTrack = { viewModel.downloadTrack(it) },
                                 onAddToPlaylist = { trackForPlaylistSheet = it },
@@ -477,6 +485,38 @@ private fun SargamAppRoot(viewModel: SargamViewModel) {
                             )
                         }
 
+                        composable<ArtistRadioRoute> { entry ->
+                            val route = entry.toRoute<ArtistRadioRoute>()
+                            LaunchedEffect(route.artistId) {
+                                if (artistRadioDetailState.artist?.id != route.artistId) {
+                                    CuratedCatalog.findArtistById(route.artistId)?.let {
+                                        viewModel.openArtistRadio(it)
+                                    }
+                                }
+                            }
+                            ArtistRadioScreen(
+                                state = artistRadioDetailState,
+                                currentPlayingVideoId = playerState.currentTrack?.videoId,
+                                downloadedVideoIds = downloadedVideoIds,
+                                favoriteVideoIds = favoriteVideoIds,
+                                downloadProgressMap = downloadProgressMap,
+                                onBackClick = { navController.popBackStack() },
+                                onRefreshClick = {
+                                    artistRadioDetailState.artist?.let {
+                                        viewModel.openArtistRadio(it, forceRefresh = true)
+                                    }
+                                },
+                                onPlayAll = { tracks -> viewModel.playAll(tracks) },
+                                onDownloadAll = { title, tracks ->
+                                    viewModel.downloadCollection(title, tracks)
+                                },
+                                onTrackClick = { track, queue -> viewModel.playTrack(track, queue) },
+                                onDownloadTrack = { viewModel.downloadTrack(it) },
+                                onAddToPlaylist = { trackForPlaylistSheet = it },
+                                onToggleFavorite = { viewModel.toggleFavorite(it) }
+                            )
+                        }
+
                         composable<PlaylistDetailRoute> { entry ->
                             val route = entry.toRoute<PlaylistDetailRoute>()
                             val playlist by remember(route.playlistId) {
@@ -547,6 +587,7 @@ private fun SargamAppRoot(viewModel: SargamViewModel) {
             onSeekTo = { viewModel.seekTo(it) },
             onToggleShuffle = { viewModel.toggleShuffle() },
             onCycleRepeat = { viewModel.cycleRepeatMode() },
+            onToggleAutoPlay = { viewModel.toggleAutoPlay() },
             onToggleFavorite = { viewModel.toggleFavorite(it) },
             onDownloadTrack = { viewModel.downloadTrack(it) },
             onAddToPlaylist = { trackForPlaylistSheet = it },

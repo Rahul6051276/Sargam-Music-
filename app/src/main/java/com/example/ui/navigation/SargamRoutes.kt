@@ -21,4 +21,7 @@ data class AlbumDetailRoute(val albumId: String)
 data class MoodDetailRoute(val moodId: String)
 
 @Serializable
+data class ArtistRadioRoute(val artistId: String)
+
+@Serializable
 data class PlaylistDetailRoute(val playlistId: Long)

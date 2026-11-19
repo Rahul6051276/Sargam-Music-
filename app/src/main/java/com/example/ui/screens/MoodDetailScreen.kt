@@ -170,10 +170,30 @@ fun MoodDetailScreen(
                                 color = TextPrimary
                             )
                             Text(
-                                text = mood?.subtitle.orEmpty(),
+                                text = buildString {
+                                    append(mood?.subtitle.orEmpty())
+                                    if (state.tracks.isNotEmpty()) {
+                                        append(" · ${state.tracks.size} Tracks")
+                                    }
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextPrimary.copy(alpha = 0.8f)
                             )
+                            if (mood?.isOldClassic == true) {
+                                Surface(
+                                    color = EmeraldTeal.copy(alpha = 0.16f),
+                                    shape = CircleShape,
+                                    border = BorderStroke(1.dp, EmeraldTeal.copy(alpha = 0.45f)),
+                                    modifier = Modifier.padding(top = 6.dp)
+                                ) {
+                                    Text(
+                                        text = "ORIGINAL AUDIO · NO REMIXES",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = EmeraldTeal,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+                            }
                         }
                     }
 
